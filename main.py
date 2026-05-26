@@ -1,73 +1,65 @@
 import requests
-import asyncio
-import logging
-from telegram import Bot
-from datetime import datetime, timezone
+from telegram import Update
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
 API_KEY = "359e1e0ab654e3eb56c7cec930de5d3e"
 TOKEN = "8856369868:AAGjBMrFLZRTMGA_XZpPxB3bGGRX48ErXFc"
-CHAT_ID = "805165304"
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+def calcular_analise(shots, corners, cards):
+    # Taxas baseadas em volume total
+    gols_taxa = min(99, (shots / 20) * 100)
+    canto_taxa = min(99, (corners / 10) * 100)
+    cartao_taxa = min(99, (cards / 4) * 100)
+    
+    return (f"🎯 Gols: {gols_taxa:.0f}%\n"
+            f"🚩 Cantos: {canto_taxa:.0f}%\n"
+            f"🟨 Cartões: {cartao_taxa:.0f}%")
 
-async def analisar_confronto(id_jogo, time_casa, time_fora):
-    headers = {'x-apisports-key': API_KEY}
+async def get_stats(id_jogo):
+    url = f"https://v3.football.api-sports.io/fixtures/statistics?fixture={id_jogo}"
     try:
-        url = f"https://v3.football.api-sports.io/fixtures/statistics?fixture={id_jogo}"
-        resp = requests.get(url, headers=headers, timeout=10).json()
+        resp = requests.get(url, headers={'x-apisports-key': API_KEY}, timeout=5).json()
+        if not resp.get('response') or len(resp['response']) < 2: return 0, 0, 0
         
-        if not resp.get('response') or len(resp['response']) < 2:
-            return None
-
         casa = {s['type']: s['value'] for s in resp['response'][0]['statistics']}
         fora = {s['type']: s['value'] for s in resp['response'][1]['statistics']}
+        
+        s = int(casa.get('Total Shots', 0) or 0) + int(fora.get('Total Shots', 0) or 0)
+        c = int(casa.get('Corner Kicks', 0) or 0) + int(fora.get('Corner Kicks', 0) or 0)
+        ca = int(casa.get('Yellow Cards', 0) or 0) + int(fora.get('Yellow Cards', 0) or 0)
+        return s, c, ca
+    except:
+        return 0, 0, 0
 
-        # Dados extraídos
-        shots = int(casa.get('Total Shots', 0) or 0) + int(fora.get('Total Shots', 0) or 0)
-        corners = int(casa.get('Corner Kicks', 0) or 0) + int(fora.get('Corner Kicks', 0) or 0)
-        cards = int(casa.get('Yellow Cards', 0) or 0) + int(fora.get('Yellow Cards', 0) or 0)
-
-        # Lógica de Taxa de Acerto e Sugestão
-        # Cálculo baseado em volume (Thresholds ajustáveis)
-        taxa_gols = min(95, (shots / 25) * 100)
-        taxa_cantos = min(95, (corners / 12) * 100)
-        taxa_cartoes = min(95, (cards / 5) * 100)
-
-        msg = (f"🔥 *SINAL DE ENTRADA*\n\n⚽ *{time_casa} x {time_fora}*\n\n"
-               f"🎯 *GOLS (Over 1.5/2.5)*\n"
-               f"→ Probabilidade: {taxa_gols:.0f}%\n"
-               f"→ Entrada: {'Over 2.5' if shots > 22 else 'Over 1.5'}\n\n"
-               f"🚩 *CANTOS (Over)*\n"
-               f"→ Probabilidade: {taxa_cantos:.0f}%\n"
-               f"→ Entrada: {'Mais de 10.5' if corners > 10 else 'Mais de 8.5'}\n\n"
-               f"🟨 *CARTÕES (Over)*\n"
-               f"→ Probabilidade: {taxa_cartoes:.0f}%\n"
-               f"→ Entrada: {'Mais de 4.5' if cards > 4 else 'Mais de 3.5'}\n\n"
-               f"⚠️ *Análise automatizada baseada em volume estatístico.*")
-        return msg
-    except Exception as e:
-        return None
-
-async def main():
-    bot = Bot(token=TOKEN)
-    await bot.send_message(chat_id=CHAT_ID, text="🚀 Robô em MODO ANALISTA ATIVO!")
+async def listar_jogos(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("📥 Carregando todos os jogos do dia... aguarde.")
+    hoje = "2026-05-26"
+    resp = requests.get(f"https://v3.football.api-sports.io/fixtures?date={hoje}", headers={'x-apisports-key': API_KEY}).json()
     
-    while True:
-        try:
-            hoje = datetime.now().strftime('%Y-%m-%d')
-            url = f"https://v3.football.api-sports.io/fixtures?date={hoje}"
-            resp = requests.get(url, headers={'x-apisports-key': API_KEY}, timeout=10).json()
-            
-            for j in resp.get('response', []):
-                # Monitora todas as ligas
-                msg = await analisar_confronto(j['fixture']['id'], j['teams']['home']['name'], j['teams']['away']['name'])
-                if msg: 
-                    await bot.send_message(chat_id=CHAT_ID, text=msg, parse_mode='Markdown')
-            
-            await asyncio.sleep(600) 
-        except Exception as e:
-            await asyncio.sleep(60)
+    jogos = resp.get('response', [])
+    if not jogos:
+        await update.message.reply_text("Nenhum jogo encontrado para hoje.")
+        return
+
+    bloco_mensagem = ""
+    contador = 0
+    total_jogos = len(jogos)
+
+    for j in jogos:
+        stats = await get_stats(j['fixture']['id'])
+        resumo = calcular_analise(*stats)
+        
+        bloco_mensagem += f"⚽ *{j['teams']['home']['name']} x {j['teams']['away']['name']}*\n{resumo}\n\n"
+        contador += 1
+        
+        # Envia bloco a cada 5 jogos ou se for o último jogo da lista
+        if contador % 5 == 0 or contador == total_jogos:
+            await update.message.reply_text(bloco_mensagem, parse_mode='Markdown')
+            bloco_mensagem = ""
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    app = ApplicationBuilder().token(TOKEN).build()
+    app.add_handler(CommandHandler("jogos", listar_jogos))
+    app.add_handler(CommandHandler("analisar", listar_jogos))
+    print("Robô em modo 'Tudo ou Nada' - Processando 100% dos jogos.")
+    app.run_polling()
