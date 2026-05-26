@@ -42,6 +42,9 @@ async def analisar_confronto(id_jogo, time_casa, time_fora):
 async def main():
     bot = Bot(token=TOKEN)
     logger.info("Robô iniciado com sucesso na nuvem!")
+    # Mensagem de teste para garantir que o bot está vivo
+    await bot.send_message(chat_id=CHAT_ID, text="🤖 Robô monitorando agora!")
+    
     while True:
         try:
             hoje = datetime.now().strftime('%Y-%m-%d')
