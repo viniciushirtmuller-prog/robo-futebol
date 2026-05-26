@@ -23,26 +23,35 @@ async def analisar_confronto(id_jogo, time_casa, time_fora):
         casa = {s['type']: s['value'] for s in resp['response'][0]['statistics']}
         fora = {s['type']: s['value'] for s in resp['response'][1]['statistics']}
 
-        shots = int(casa.get('Total Shots', 0)) + int(fora.get('Total Shots', 0))
-        corners = int(casa.get('Corner Kicks', 0)) + int(fora.get('Corner Kicks', 0))
-        
-        # Lógica de Taxa de Acerto Estimada
-        score = 0
-        if shots > 20: score += 40
-        if corners > 10: score += 40
-        if score == 0: score = 30 # Mínimo de chance
-        
-        return (f"🔥 *SINAL DE ENTRADA*\n\n⚽ *{time_casa} x {time_fora}*\n"
-                f"📈 Taxa de Acerto Estimada: {score}%\n\n"
-                f"🎯 Total Chutes: {shots}\n"
-                f"🚩 Total Cantos: {corners}\n"
-                f"⚠️ *Analise antes de entrar!*")
+        # Dados extraídos
+        shots = int(casa.get('Total Shots', 0) or 0) + int(fora.get('Total Shots', 0) or 0)
+        corners = int(casa.get('Corner Kicks', 0) or 0) + int(fora.get('Corner Kicks', 0) or 0)
+        cards = int(casa.get('Yellow Cards', 0) or 0) + int(fora.get('Yellow Cards', 0) or 0)
+
+        # Lógica de Taxa de Acerto e Sugestão
+        # Cálculo baseado em volume (Thresholds ajustáveis)
+        taxa_gols = min(95, (shots / 25) * 100)
+        taxa_cantos = min(95, (corners / 12) * 100)
+        taxa_cartoes = min(95, (cards / 5) * 100)
+
+        msg = (f"🔥 *SINAL DE ENTRADA*\n\n⚽ *{time_casa} x {time_fora}*\n\n"
+               f"🎯 *GOLS (Over 1.5/2.5)*\n"
+               f"→ Probabilidade: {taxa_gols:.0f}%\n"
+               f"→ Entrada: {'Over 2.5' if shots > 22 else 'Over 1.5'}\n\n"
+               f"🚩 *CANTOS (Over)*\n"
+               f"→ Probabilidade: {taxa_cantos:.0f}%\n"
+               f"→ Entrada: {'Mais de 10.5' if corners > 10 else 'Mais de 8.5'}\n\n"
+               f"🟨 *CARTÕES (Over)*\n"
+               f"→ Probabilidade: {taxa_cartoes:.0f}%\n"
+               f"→ Entrada: {'Mais de 4.5' if cards > 4 else 'Mais de 3.5'}\n\n"
+               f"⚠️ *Análise automatizada baseada em volume estatístico.*")
+        return msg
     except Exception as e:
         return None
 
 async def main():
     bot = Bot(token=TOKEN)
-    await bot.send_message(chat_id=CHAT_ID, text="🚀 Robô em MODO FULL (Todas as ligas)!")
+    await bot.send_message(chat_id=CHAT_ID, text="🚀 Robô em MODO ANALISTA ATIVO!")
     
     while True:
         try:
@@ -51,12 +60,12 @@ async def main():
             resp = requests.get(url, headers={'x-apisports-key': API_KEY}, timeout=10).json()
             
             for j in resp.get('response', []):
-                # Monitora todas as ligas, sem filtrar ID
+                # Monitora todas as ligas
                 msg = await analisar_confronto(j['fixture']['id'], j['teams']['home']['name'], j['teams']['away']['name'])
                 if msg: 
                     await bot.send_message(chat_id=CHAT_ID, text=msg, parse_mode='Markdown')
             
-            await asyncio.sleep(600) # Checagem a cada 10 min
+            await asyncio.sleep(600) 
         except Exception as e:
             await asyncio.sleep(60)
 
