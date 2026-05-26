@@ -7,7 +7,6 @@ from datetime import datetime, timezone
 API_KEY = "359e1e0ab654e3eb56c7cec930de5d3e"
 TOKEN = "8856369868:AAGjBMrFLZRTMGA_XZpPxB3bGGRX48ErXFc"
 CHAT_ID = "805165304"
-LIGAS_ELITE = [71, 13, 11, 39, 140, 2] 
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -26,21 +25,24 @@ async def analisar_confronto(id_jogo, time_casa, time_fora):
 
         shots = int(casa.get('Total Shots', 0)) + int(fora.get('Total Shots', 0))
         corners = int(casa.get('Corner Kicks', 0)) + int(fora.get('Corner Kicks', 0))
-        cards = int(casa.get('Yellow Cards', 0)) + int(fora.get('Yellow Cards', 0))
-
-        # Filtro mais leve: diminuímos a exigência para disparar mais sinais
-        if shots > 18 or corners > 8 or cards > 3:
-            return (f"🔔 *ALERTA DE OPORTUNIDADE*\n\n⚽ *{time_casa} x {time_fora}*\n"
-                    f"🎯 Gols (Over): {'Sim' if shots > 20 else 'Possível'}\n"
-                    f"🚩 Cantos: {corners} (Total)\n"
-                    f"🟨 Cartões: {cards} (Total)")
-        return None
+        
+        # Lógica de Taxa de Acerto Estimada
+        score = 0
+        if shots > 20: score += 40
+        if corners > 10: score += 40
+        if score == 0: score = 30 # Mínimo de chance
+        
+        return (f"🔥 *SINAL DE ENTRADA*\n\n⚽ *{time_casa} x {time_fora}*\n"
+                f"📈 Taxa de Acerto Estimada: {score}%\n\n"
+                f"🎯 Total Chutes: {shots}\n"
+                f"🚩 Total Cantos: {corners}\n"
+                f"⚠️ *Analise antes de entrar!*")
     except Exception as e:
         return None
 
 async def main():
     bot = Bot(token=TOKEN)
-    await bot.send_message(chat_id=CHAT_ID, text="🤖 Robô em modo ALERTA ATIVO!")
+    await bot.send_message(chat_id=CHAT_ID, text="🚀 Robô em MODO FULL (Todas as ligas)!")
     
     while True:
         try:
@@ -49,17 +51,12 @@ async def main():
             resp = requests.get(url, headers={'x-apisports-key': API_KEY}, timeout=10).json()
             
             for j in resp.get('response', []):
-                if j['league']['id'] in LIGAS_ELITE:
-                    hora_jogo = datetime.strptime(j['fixture']['date'], '%Y-%m-%dT%H:%M:%S+00:00')
-                    tempo_restante = (hora_jogo - datetime.now(timezone.utc).replace(tzinfo=None)).total_seconds() / 60
-                    
-                    # Aumentado para 180 min (3 horas) para capturar mais jogos
-                    if 0 < tempo_restante < 180:
-                        msg = await analisar_confronto(j['fixture']['id'], j['teams']['home']['name'], j['teams']['away']['name'])
-                        if msg: 
-                            await bot.send_message(chat_id=CHAT_ID, text=msg, parse_mode='Markdown')
+                # Monitora todas as ligas, sem filtrar ID
+                msg = await analisar_confronto(j['fixture']['id'], j['teams']['home']['name'], j['teams']['away']['name'])
+                if msg: 
+                    await bot.send_message(chat_id=CHAT_ID, text=msg, parse_mode='Markdown')
             
-            await asyncio.sleep(600) # Checa a cada 10 minutos para ser mais rápido
+            await asyncio.sleep(600) # Checagem a cada 10 min
         except Exception as e:
             await asyncio.sleep(60)
 
