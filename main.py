@@ -3,11 +3,14 @@ import asyncio
 from datetime import datetime
 from telegram import Bot
 from telegram.ext import ApplicationBuilder, CommandHandler
+from groq import Groq
 
-# CONFIGURAÇÕES - Não altere nada aqui
+# SEUS DADOS FIXOS
 API_KEY = "359e1e0ab654e3eb56c7cec930de5d3e"
 TOKEN_TELEGRAM = "8856369868:AAGjBMrFLZRTMGA_XZpPxB3bGGRX48ErXFc"
 CHAT_ID = "805165304"
+# Certifique-se de adicionar GROQ_API_KEY nas variáveis de ambiente da Railway
+GROQ_API = "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" # Substitua se for diferente
 
 LIGAS = {
     "13": "Libertadores", "11": "Copa Sul-Americana", "71": "Brasileirão A",
@@ -17,7 +20,7 @@ LIGAS = {
 }
 
 bot = Bot(token=TOKEN_TELEGRAM)
-robo_ativo = False
+groq_client = Groq(api_key=GROQ_API)
 
 def obter_estatisticas(fixture_id):
     url = f"https://v3.football.api-sports.io/fixtures/statistics?fixture={fixture_id}"
@@ -34,39 +37,40 @@ def obter_estatisticas(fixture_id):
     except:
         return {"gols": 2.5, "cantos": 9.0, "cartoes": 3.0}
 
+def gerar_analise_ia(stats, casa, fora, liga):
+    prompt = f"Analise o jogo {casa} x {fora} da liga {liga}. Dados: Média de Gols {stats['gols']}, Cantos {stats['cantos']}, Cartões {stats['cartoes']}. Escreva uma análise técnica e direta para Telegram."
+    try:
+        chat = groq_client.chat.completions.create(
+            messages=[{"role": "user", "content": prompt}],
+            model="llama3-8b-8192",
+        )
+        return chat.choices[0].message.content
+    except:
+        return "Análise de mercado em processamento."
+
 async def monitorar():
-    global robo_ativo
-    while robo_ativo:
-        # Envia sinal de vida
-        await bot.send_message(chat_id=CHAT_ID, text="🤖 Robô em varredura ativa...")
-        
+    while True:
         data_hoje = datetime.now().strftime("%Y-%m-%d")
         for l_id, nome_liga in LIGAS.items():
             url = f"https://v3.football.api-sports.io/fixtures?date={data_hoje}&league={l_id}&season=2026"
             try:
                 resp = requests.get(url, headers={'x-apisports-key': API_KEY}).json()
                 for j in resp.get('response', []):
-                    # Filtro reduzido para testar: Se for > 0, ele avisa
                     stats = obter_estatisticas(j['fixture']['id'])
+                    analise = gerar_analise_ia(stats, j['teams']['home']['name'], j['teams']['away']['name'], nome_liga)
                     
                     msg = (f"⚽ <b>{j['teams']['home']['name']} x {j['teams']['away']['name']}</b>\n"
                            f"🏆 {nome_liga}\n\n"
-                           f"📊 <b>Estatísticas Reais:</b>\n"
-                           f"• Média Gols: {stats['gols']}\n"
-                           f"• Média Cantos: {stats['cantos']}\n"
-                           f"• Média Cartões: {stats['cartoes']}\n\n"
-                           f"💡 <i>Monitoramento em tempo real ativo.</i>")
+                           f"🤖 <b>Análise da IA:</b>\n{analise}\n\n"
+                           f"📊 <i>Estatísticas: Gols {stats['gols']} | Cantos {stats['cantos']} | Cartões {stats['cartoes']}</i>")
                     
                     await bot.send_message(chat_id=CHAT_ID, text=msg, parse_mode='HTML')
-                    await asyncio.sleep(3)
+                    await asyncio.sleep(6)
             except: continue
-        
-        await asyncio.sleep(1800) # Espera 30 minutos
+        await asyncio.sleep(3600)
 
 async def start(u, c):
-    global robo_ativo
-    robo_ativo = True
-    await u.message.reply_text("✅ Robô iniciado. Receberá dados de todos os jogos do dia.")
+    await u.message.reply_text("✅ Robô Integrado com IA está rodando e monitorando o mercado.")
     asyncio.create_task(monitorar())
 
 if __name__ == '__main__':
