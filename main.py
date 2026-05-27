@@ -1,6 +1,8 @@
 import requests
 import os
 import sys
+from datetime import datetime
+import pytz
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 from groq import Groq
@@ -9,12 +11,10 @@ from groq import Groq
 API_KEY_FUTEBOL = "359e1e0ab654e3eb56c7cec930de5d3e"
 TOKEN_TELEGRAM = "8856369868:AAGjBMrFLZRTMGA_XZpPxB3bGGRX48ErXFc"
 
-# Carrega a chave de forma segura
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 if not GROQ_API_KEY:
-    print("ERRO CRÍTICO: GROQ_API_KEY não configurada na Railway!")
-    sys.exit(1) # Para o bot se não tiver chave
+    sys.exit(1)
 
 client = Groq(api_key=GROQ_API_KEY)
 
@@ -22,7 +22,7 @@ async def analisar_com_ia(dados):
     prompt = f"""
     Analise estes dados de um jogo de futebol: {dados}.
     Dê uma recomendação de aposta (Gols, Cantos ou Cartões) curta, direta e profissional. 
-    Justifique com base nos números. Se os números forem baixos, informe que não há valor.
+    Justifique com base nos números. Se os dados forem insuficientes ou muito baixos, diga que não há valor.
     """
     try:
         chat_completion = client.chat.completions.create(
@@ -31,7 +31,7 @@ async def analisar_com_ia(dados):
         )
         return chat_completion.choices[0].message.content
     except Exception as e:
-        return f"Erro ao processar IA: {str(e)}"
+        return f"Erro na IA: {str(e)}"
 
 async def comando_analisar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
@@ -39,9 +39,11 @@ async def comando_analisar(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
         
     time_busca = " ".join(context.args).lower()
-    await update.message.reply_text(f"🤖 Analisando {time_busca}...")
+    await update.message.reply_text(f"🤖 Buscando dados de {time_busca}...")
     
-    hoje = "2026-05-26"
+    # Fuso Horário de Brasília
+    tz = pytz.timezone('America/Sao_Paulo')
+    hoje = datetime.now(tz).strftime('%Y-%m-%d')
     url = f"https://v3.football.api-sports.io/fixtures?date={hoje}"
     
     try:
@@ -53,25 +55,28 @@ async def comando_analisar(update: Update, context: ContextTypes.DEFAULT_TYPE):
             away = j['teams']['away']['name'].lower()
             
             if time_busca in home or time_busca in away:
+                status = j['fixture']['status']['short']
+                # NS: Não começou, 1H/2H/HT: Ao vivo
+                if status not in ['NS', '1H', '2H', 'HT']: 
+                    continue
+                
                 id_jogo = j['fixture']['id']
                 stat_url = f"https://v3.football.api-sports.io/fixtures/statistics?fixture={id_jogo}"
                 stats = requests.get(stat_url, headers={'x-apisports-key': API_KEY_FUTEBOL}).json()
                 
-                dados = f"{home.upper()} vs {away.upper()}. Estatísticas: {stats.get('response')}"
+                dados = f"{home.upper()} vs {away.upper()}. Status: {status}. Estatísticas: {stats.get('response')}"
                 analise = await analisar_com_ia(dados)
                 
-                await update.message.reply_text(f"⚽ *{home.upper()} x {away.upper()}*\n\n{analise}", parse_mode='Markdown')
+                await update.message.reply_text(f"⚽ *{home.upper()} x {away.upper()}*\nStatus: {status}\n\n{analise}", parse_mode='Markdown')
                 encontrou = True
                 break
                 
         if not encontrou:
-            await update.message.reply_text("Jogo não encontrado hoje.")
+            await update.message.reply_text("Jogo não encontrado ou sem estatísticas disponíveis no momento.")
     except Exception as e:
-        await update.message.reply_text("Erro ao buscar dados. Tente novamente.")
+        await update.message.reply_text("Erro ao processar dados. Tente novamente.")
 
 if __name__ == '__main__':
     app = ApplicationBuilder().token(TOKEN_TELEGRAM).build()
     app.add_handler(CommandHandler("analisar", comando_analisar))
-    app.add_handler(CommandHandler("jogos", comando_analisar))
-    app.add_handler(CommandHandler("bingos", comando_analisar))
     app.run_polling()
