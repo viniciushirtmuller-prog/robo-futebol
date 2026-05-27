@@ -1,82 +1,12 @@
-import requests
-import os
-import sys
-from datetime import datetime
-import pytz
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
-from groq import Groq
-
-# CONFIGURAÇÕES
-API_KEY_FUTEBOL = "359e1e0ab654e3eb56c7cec930de5d3e"
-TOKEN_TELEGRAM = "8856369868:AAGjBMrFLZRTMGA_XZpPxB3bGGRX48ErXFc"
-
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-
-if not GROQ_API_KEY:
-    sys.exit(1)
-
-client = Groq(api_key=GROQ_API_KEY)
-
-async def analisar_com_ia(dados):
-    prompt = f"""
-    Analise estes dados de um jogo de futebol: {dados}.
-    Dê uma recomendação de aposta (Gols, Cantos ou Cartões) curta, direta e profissional. 
-    Justifique com base nos números. Se os dados forem insuficientes ou muito baixos, diga que não há valor.
-    """
-    try:
-        chat_completion = client.chat.completions.create(
-            messages=[{"role": "user", "content": prompt}],
-            model="llama3-8b-8192",
-        )
-        return chat_completion.choices[0].message.content
-    except Exception as e:
-        return f"Erro na IA: {str(e)}"
-
-async def comando_analisar(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args:
-        await update.message.reply_text("Digite: /analisar [nome do time]")
-        return
-        
-    time_busca = " ".join(context.args).lower()
-    await update.message.reply_text(f"🤖 Buscando dados de {time_busca}...")
-    
-    # Fuso Horário de Brasília
-    tz = pytz.timezone('America/Sao_Paulo')
-    hoje = datetime.now(tz).strftime('%Y-%m-%d')
+# Adicione este comando para debugar
+async def debug_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    hoje = datetime.now(pytz.timezone('America/Sao_Paulo')).strftime('%Y-%m-%d')
     url = f"https://v3.football.api-sports.io/fixtures?date={hoje}"
+    resp = requests.get(url, headers={'x-apisports-key': API_KEY_FUTEBOL}).json()
     
-    try:
-        resp = requests.get(url, headers={'x-apisports-key': API_KEY_FUTEBOL}).json()
-        encontrou = False
-        
-        for j in resp.get('response', []):
-            home = j['teams']['home']['name'].lower()
-            away = j['teams']['away']['name'].lower()
-            
-            if time_busca in home or time_busca in away:
-                status = j['fixture']['status']['short']
-                # NS: Não começou, 1H/2H/HT: Ao vivo
-                if status not in ['NS', '1H', '2H', 'HT']: 
-                    continue
-                
-                id_jogo = j['fixture']['id']
-                stat_url = f"https://v3.football.api-sports.io/fixtures/statistics?fixture={id_jogo}"
-                stats = requests.get(stat_url, headers={'x-apisports-key': API_KEY_FUTEBOL}).json()
-                
-                dados = f"{home.upper()} vs {away.upper()}. Status: {status}. Estatísticas: {stats.get('response')}"
-                analise = await analisar_com_ia(dados)
-                
-                await update.message.reply_text(f"⚽ *{home.upper()} x {away.upper()}*\nStatus: {status}\n\n{analise}", parse_mode='Markdown')
-                encontrou = True
-                break
-                
-        if not encontrou:
-            await update.message.reply_text("Jogo não encontrado ou sem estatísticas disponíveis no momento.")
-    except Exception as e:
-        await update.message.reply_text("Erro ao processar dados. Tente novamente.")
+    # Mostra os 2 primeiros jogos encontrados no dia
+    jogos = str(resp.get('response', [])[:2])
+    await update.message.reply_text(f"Resposta da API: {jogos[:1000]}") # Limita o texto
 
-if __name__ == '__main__':
-    app = ApplicationBuilder().token(TOKEN_TELEGRAM).build()
-    app.add_handler(CommandHandler("analisar", comando_analisar))
-    app.run_polling()
+# No seu app, adicione:
+app.add_handler(CommandHandler("debug", debug_api))
