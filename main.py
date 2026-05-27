@@ -4,7 +4,7 @@ from datetime import datetime
 from telegram import Bot
 from telegram.ext import ApplicationBuilder, CommandHandler
 
-# CONFIGURAÇÕES
+# CONFIGURAÇÕES - Não altere nada aqui
 API_KEY = "359e1e0ab654e3eb56c7cec930de5d3e"
 TOKEN_TELEGRAM = "8856369868:AAGjBMrFLZRTMGA_XZpPxB3bGGRX48ErXFc"
 CHAT_ID = "805165304"
@@ -19,21 +19,7 @@ LIGAS = {
 bot = Bot(token=TOKEN_TELEGRAM)
 robo_ativo = False
 
-def calcular_valor(stats):
-    # Lógica Matemática: Probabilidade baseada em média de Gols
-    prob_real = min((stats['gols'] / 4.0), 0.95)
-    odd_justa = 1 / prob_real
-    
-    # Exemplo: Se odd da casa for > odd_justa + 15% de margem
-    odd_casa_exemplo = 2.10 
-    ev = (prob_real * odd_casa_exemplo) - 1
-    
-    # Critério de Kelly (Stake)
-    stake = max(0.01, min(0.05, (prob_real * odd_casa_exemplo - 1) / (odd_casa_exemplo - 1)))
-    
-    return ev, stake, odd_justa
-
-def obter_dados_reais(fixture_id):
+def obter_estatisticas(fixture_id):
     url = f"https://v3.football.api-sports.io/fixtures/statistics?fixture={fixture_id}"
     headers = {'x-apisports-key': API_KEY}
     try:
@@ -48,40 +34,39 @@ def obter_dados_reais(fixture_id):
     except:
         return {"gols": 2.5, "cantos": 9.0, "cartoes": 3.0}
 
-async def processar_jogo(j, nome_liga):
-    stats = obter_dados_reais(j['fixture']['id'])
-    ev, stake, odd_justa = calcular_valor(stats)
-    
-    if ev > 0.15: # FILTRO DE VALOR: Só envia se EV > 15%
-        msg = (f"💎 <b>SINAL DE VALOR (+EV)</b>\n"
-               f"⚽ {j['teams']['home']['name']} x {j['teams']['away']['name']}\n"
-               f"🏆 {nome_liga}\n\n"
-               f"📊 <b>Análise Matemática:</b>\n"
-               f"• Média Gols: {stats['gols']} | Cantos: {stats['cantos']}\n"
-               f"• Valor Esperado (EV): +{int(ev*100)}%\n\n"
-               f"💰 <b>Gestão Profissional:</b>\n"
-               f"• Odd Justa: {round(odd_justa, 2)}\n"
-               f"• Stake Recomendada: {int(stake*100)}% da banca\n\n"
-               f"💡 <i>Entrada: Over 2.5 Gols | Oportunidade por desajuste de mercado.</i>")
-        await bot.send_message(chat_id=CHAT_ID, text=msg, parse_mode='HTML')
-
 async def monitorar():
     global robo_ativo
     while robo_ativo:
+        # Envia sinal de vida
+        await bot.send_message(chat_id=CHAT_ID, text="🤖 Robô em varredura ativa...")
+        
+        data_hoje = datetime.now().strftime("%Y-%m-%d")
         for l_id, nome_liga in LIGAS.items():
-            url = f"https://v3.football.api-sports.io/fixtures?date={datetime.now().strftime('%Y-%m-%d')}&league={l_id}&season=2026"
+            url = f"https://v3.football.api-sports.io/fixtures?date={data_hoje}&league={l_id}&season=2026"
             try:
                 resp = requests.get(url, headers={'x-apisports-key': API_KEY}).json()
                 for j in resp.get('response', []):
-                    await processar_jogo(j, nome_liga)
-                    await asyncio.sleep(2)
+                    # Filtro reduzido para testar: Se for > 0, ele avisa
+                    stats = obter_estatisticas(j['fixture']['id'])
+                    
+                    msg = (f"⚽ <b>{j['teams']['home']['name']} x {j['teams']['away']['name']}</b>\n"
+                           f"🏆 {nome_liga}\n\n"
+                           f"📊 <b>Estatísticas Reais:</b>\n"
+                           f"• Média Gols: {stats['gols']}\n"
+                           f"• Média Cantos: {stats['cantos']}\n"
+                           f"• Média Cartões: {stats['cartoes']}\n\n"
+                           f"💡 <i>Monitoramento em tempo real ativo.</i>")
+                    
+                    await bot.send_message(chat_id=CHAT_ID, text=msg, parse_mode='HTML')
+                    await asyncio.sleep(3)
             except: continue
-        await asyncio.sleep(3600)
+        
+        await asyncio.sleep(1800) # Espera 30 minutos
 
 async def start(u, c):
     global robo_ativo
     robo_ativo = True
-    await u.message.reply_text("🚀 Robô de Valor ATIVADO. Buscando desajustes matemáticos...")
+    await u.message.reply_text("✅ Robô iniciado. Receberá dados de todos os jogos do dia.")
     asyncio.create_task(monitorar())
 
 if __name__ == '__main__':
