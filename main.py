@@ -1,64 +1,71 @@
 import requests
-from datetime import datetime, timezone
+import os
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from groq import Groq
 
-API_KEY = "359e1e0ab654e3eb56c7cec930de5d3e"
-TOKEN = "8856369868:AAGjBMrFLZRTMGA_XZpPxB3bGGRX48ErXFc"
+# CONFIGURAÇÕES
+API_KEY_FUTEBOL = "359e1e0ab654e3eb56c7cec930de5d3e"
+TOKEN_TELEGRAM = "8856369868:AAGjBMrFLZRTMGA_XZpPxB3bGGRX48ErXFc"
 
-def gerar_analise(s, c, ca):
-    # Logica de recomendação
-    recom = "Aguardando mais dados"
-    if s > 20: recom = "Gols: Over 2.5"
-    elif c > 8: recom = "Cantos: Mais de 9.5"
-    elif ca > 3: recom = "Cartões: Mais de 3.5"
-    
-    return (f"📊 Taxa de Confiança: {(s+c+ca)/2}% \n"
-            f"✅ Entrada Sugerida: *{recom}*\n"
-            f"🎯 Total Chutes/Cantos/Cartões: {s}/{c}/{ca}")
+# A chave será lida da Railway (Variáveis de Ambiente)
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
-async def get_jogos_filtrados(query=None):
-    hoje = datetime.now().strftime('%Y-%m-%d')
-    url = f"https://v3.football.api-sports.io/fixtures?date={hoje}"
-    resp = requests.get(url, headers={'x-apisports-key': API_KEY}).json()
-    
-    lista = []
-    agora = datetime.now(timezone.utc)
-    
-    for j in resp.get('response', []):
-        data_jogo = datetime.strptime(j['fixture']['date'], '%Y-%m-%dT%H:%M:%S+00:00').replace(tzinfo=timezone.utc)
+client = Groq(api_key=GROQ_API_KEY)
+
+async def analisar_com_ia(dados):
+    prompt = f"""
+    Analise estes dados de um jogo de futebol: {dados}.
+    Dê uma recomendação de aposta curta e direta (Gols, Cantos ou Cartões) 
+    com uma justificativa baseada nos números fornecidos. 
+    Se os números forem muito baixos, diga que não há valor.
+    """
+    try:
+        chat_completion = client.chat.completions.create(
+            messages=[{"role": "user", "content": prompt}],
+            model="llama3-8b-8192",
+        )
+        return chat_completion.choices[0].message.content
+    except Exception as e:
+        return f"Erro ao consultar IA: {str(e)}"
+
+async def comando_analisar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("Digite o nome do time. Ex: /analisar flamengo")
+        return
         
-        # Filtra apenas jogos que ainda vão começar
-        if data_jogo > agora:
-            if query and query.lower() not in j['teams']['home']['name'].lower() and query.lower() not in j['teams']['away']['name'].lower():
-                continue
-            
-            # Pega estatísticas
+    time_busca = " ".join(context.args).lower()
+    await update.message.reply_text(f"🤖 Analisando {time_busca}...")
+    
+    hoje = "2026-05-26"
+    url = f"https://v3.football.api-sports.io/fixtures?date={hoje}"
+    
+    resp = requests.get(url, headers={'x-apisports-key': API_KEY_FUTEBOL}).json()
+    
+    encontrou = False
+    for j in resp.get('response', []):
+        home = j['teams']['home']['name'].lower()
+        away = j['teams']['away']['name'].lower()
+        
+        if time_busca in home or time_busca in away:
             id_jogo = j['fixture']['id']
             stat_url = f"https://v3.football.api-sports.io/fixtures/statistics?fixture={id_jogo}"
-            stats = requests.get(stat_url, headers={'x-apisports-key': API_KEY}).json().get('response', [])
+            stats = requests.get(stat_url, headers={'x-apisports-key': API_KEY_FUTEBOL}).json()
             
-            s, c, ca = 0, 0, 0
-            if len(stats) >= 2:
-                casa = {st['type']: st['value'] for st in stats[0]['statistics']}
-                fora = {st['type']: st['value'] for st in stats[1]['statistics']}
-                s = int(casa.get('Total Shots', 0) or 0) + int(fora.get('Total Shots', 0) or 0)
-                c = int(casa.get('Corner Kicks', 0) or 0) + int(fora.get('Corner Kicks', 0) or 0)
-                ca = int(casa.get('Yellow Cards', 0) or 0) + int(fora.get('Yellow Cards', 0) or 0)
+            dados = f"{home.upper()} vs {away.upper()}. Estatísticas: {stats.get('response')}"
             
-            lista.append(f"⚽ {j['teams']['home']['name']} x {j['teams']['away']['name']}\n{gerar_analise(s, c, ca)}")
-    return lista
-
-async def cmd_analisar(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = " ".join(context.args)
-    resultados = await get_jogos_filtrados(query)
-    if not resultados: await update.message.reply_text("Nenhum jogo futuro encontrado.")
-    else: await update.message.reply_text("\n\n".join(resultados), parse_mode='Markdown')
+            analise = await analisar_com_ia(dados)
+            await update.message.reply_text(f"⚽ *{home.upper()} x {away.upper()}*\n\n{analise}", parse_mode='Markdown')
+            encontrou = True
+            break
+            
+    if not encontrou:
+        await update.message.reply_text("Jogo não encontrado ou sem estatísticas hoje.")
 
 if __name__ == '__main__':
-    app = ApplicationBuilder().token(TOKEN).build()
-    app.add_handler(CommandHandler("jogos", cmd_analisar)) # /jogos
-    app.add_handler(CommandHandler("bingos", cmd_analisar)) # /bingos
-    app.add_handler(CommandHandler("analisar", cmd_analisar)) # /analisar time
-    print("Robô corrigido e pronto.")
+    app = ApplicationBuilder().token(TOKEN_TELEGRAM).build()
+    app.add_handler(CommandHandler("analisar", comando_analisar))
+    app.add_handler(CommandHandler("jogos", comando_analisar))
+    app.add_handler(CommandHandler("bingos", comando_analisar))
+    print("Robô operacional com IA!")
     app.run_polling()
