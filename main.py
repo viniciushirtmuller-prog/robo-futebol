@@ -7,9 +7,9 @@ from telegram.ext import ApplicationBuilder, CommandHandler
 from groq import Groq
 
 # CONFIGURAÇÕES FIXAS
-API_KEY = "359e1e0ab654e3eb56c7cec930de5d3e"
-TOKEN_TELEGRAM = "8856369868:AAGjBMrFLZRTMGA_XZpPxB3bGGRX48ErXFc"
-CHAT_ID = "805165304"
+API_KEY = ""
+TOKEN_TELEGRAM = ":AAGjBMrFLZRTMGA_XZpPxB3bGGRX48ErXFc"
+CHAT_ID = ""
 GROQ_API = "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"
 
 LIGAS = {
